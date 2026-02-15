@@ -7,7 +7,7 @@ export default function Login() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+        redirectTo: window.location.origin,
       },
     });
   };
