@@ -1,65 +1,221 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+  const router = useRouter();
+
+  const [user, setUser] = useState<any>(null);
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [bookmarks, setBookmarks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // ---------------- AUTH CHECK ----------------
+  useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getSession();
+
+      if (!data.session) {
+        router.push("/login");
+      } else {
+        setUser(data.session.user);
+      }
+
+      setLoading(false);
+    };
+
+    getUser();
+  }, [router]);
+
+  // ---------------- FETCH BOOKMARKS ----------------
+  const fetchBookmarks = async () => {
+    const { data, error } = await supabase
+      .from("bookmarks")
+      .select("*")
+      .eq("user_id", user?.id)
+      .order("created_at", { ascending: false });
+
+    if (!error) {
+      setBookmarks(data || []);
+    }
+  };
+
+  // ---------------- REALTIME ----------------
+  useEffect(() => {
+    if (!user) return;
+
+    fetchBookmarks();
+
+    const channel = supabase
+      .channel(`user-bookmarks-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookmarks",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log("Realtime:", payload);
+
+          if (payload.eventType === "INSERT") {
+            setBookmarks((prev) => [payload.new, ...prev]);
+          }
+
+          if (payload.eventType === "DELETE") {
+            setBookmarks((prev) => prev.filter((b) => b.id !== payload.old.id));
+          }
+
+          if (payload.eventType === "UPDATE") {
+            setBookmarks((prev) =>
+              prev.map((b) => (b.id === payload.new.id ? payload.new : b)),
+            );
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  // ---------------- ADD BOOKMARK ----------------
+  const addBookmark = async () => {
+    if (!title.trim() || !url.trim()) return;
+
+    const { error } = await supabase.from("bookmarks").insert([
+      {
+        title,
+        url,
+        user_id: user.id,
+      },
+    ]);
+
+    if (error) {
+      console.error("Insert error:", error);
+    } else {
+      setTitle("");
+      setUrl("");
+    }
+  };
+
+  // ---------------- DELETE BOOKMARK ----------------
+  const deleteBookmark = async (id: string) => {
+    const { error } = await supabase.from("bookmarks").delete().eq("id", id);
+
+    if (!error) {
+      // instantly remove from UI
+      setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id));
+    }
+  };
+
+  // ---------------- LOGOUT ----------------
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  if (loading)
+    return <p className="text-center mt-10 text-gray-600">Loading...</p>;
+
+  if (!user) return null;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-gray-100 flex justify-center py-12 px-4">
+      <div className="w-full max-w-xl bg-white rounded-3xl shadow-xl p-8">
+        {/* HEADER */}
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">
+              🔖 Smart Bookmark
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Logged in as {user.email}
+            </p>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            Logout
+          </button>
+        </div>
+
+        {/* ADD BOOKMARK */}
+        <div className="bg-gray-50 rounded-2xl p-5 shadow-inner mb-6">
+          <div className="space-y-3">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Bookmark Title"
+              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-blue-500"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://example.com"
+              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-900 focus:ring-2 focus:ring-blue-500"
+            />
+
+            <button
+              onClick={addBookmark}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-semibold transition"
+            >
+              + Add Bookmark
+            </button>
+          </div>
         </div>
-      </main>
+
+        {/* BOOKMARK LIST */}
+        <div>
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">
+            Your Bookmarks
+          </h2>
+
+          {bookmarks.length === 0 ? (
+            <div className="text-center py-6 text-gray-400">
+              🚀 No bookmarks yet
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {bookmarks.map((bookmark) => (
+                <div
+                  key={bookmark.id}
+                  className="flex justify-between items-center bg-white border border-gray-200 p-4 rounded-xl shadow-sm hover:shadow-md transition"
+                >
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="font-semibold text-gray-800 truncate">
+                      {bookmark.title}
+                    </span>
+                    <a
+                      href={bookmark.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 truncate hover:underline"
+                    >
+                      {bookmark.url}
+                    </a>
+                  </div>
+
+                  <button
+                    onClick={() => deleteBookmark(bookmark.id)}
+                    className="text-red-500 hover:text-red-600 text-xl"
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
