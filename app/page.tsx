@@ -86,23 +86,27 @@ export default function Home() {
 
   // ---------------- ADD BOOKMARK ----------------
   const addBookmark = async () => {
-    if (!title.trim() || !url.trim()) return;
+  if (!title.trim() || !url.trim()) return;
 
-    const { error } = await supabase.from("bookmarks").insert([
-      {
-        title,
-        url,
-        user_id: user.id,
-      },
-    ]);
+  let formattedUrl = url.trim();
 
-    if (error) {
-      console.error("Insert error:", error);
-    } else {
-      setTitle("");
-      setUrl("");
-    }
-  };
+  if (!formattedUrl.startsWith("http://") && !formattedUrl.startsWith("https://")) {
+    formattedUrl = "https://" + formattedUrl;
+  }
+
+  const { error } = await supabase.from("bookmarks").insert([
+    {
+      title,
+      url: formattedUrl,
+      user_id: user.id,
+    },
+  ]);
+
+  if (!error) {
+    setTitle("");
+    setUrl("");
+  }
+};
 
   // ---------------- DELETE BOOKMARK ----------------
   const deleteBookmark = async (id: string) => {
